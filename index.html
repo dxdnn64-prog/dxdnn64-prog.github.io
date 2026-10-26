@@ -1,0 +1,311 @@
+<title>Neon Love Heart</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap">
+<style>
+  /* Один экран: чёрный фон, сердце складывается из надписей; по центру скрытая кнопка с посланием */
+  :root {
+    --night: #050304;
+    --night-veil: rgba(5, 3, 4, 0.88);
+    --neon: #ff3b47;
+    --blush: #ffb3b8;
+    --petal: #ffe5e7;
+    --hint: #5a3438;
+    --font-phrase: system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
+    --font-letter: "Cormorant Garamond", "Iowan Old Style", Georgia, "Times New Roman", serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--night);
+    color: var(--blush);
+    overflow: hidden;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .hint {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 0 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    text-align: center; font: 12px/1.4 var(--font-phrase);
+    color: var(--hint); letter-spacing: 0.04em; pointer-events: none;
+  }
+
+  /* Скрытая кнопка поверх центра сердца: ничем себя не выдаёт */
+  #open-letter {
+    position: fixed; border: 0; padding: 0; margin: 0;
+    background: transparent; border-radius: 50%; cursor: default;
+  }
+  #open-letter:focus { outline: none; }
+  #open-letter:focus-visible { outline: 1px dashed var(--hint); outline-offset: 4px; }
+
+  /* Страница с посланием */
+  #letter {
+    position: fixed; inset: 0; z-index: 5;
+    background: var(--night-veil);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    opacity: 0; transition: opacity 0.6s ease;
+    user-select: text; -webkit-user-select: text;
+  }
+  #letter.shown { opacity: 1; }
+  .letter-inner {
+    min-height: 100%;
+    display: flex; flex-direction: column; justify-content: center; gap: 28px;
+    max-width: 34rem; margin: 0 auto;
+    padding-block: calc(48px + env(safe-area-inset-top, 0px)) calc(48px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+    box-sizing: border-box;
+    transform: translateY(12px); transition: transform 0.8s ease;
+  }
+  #letter.shown .letter-inner { transform: none; }
+  .letter-mark { font: 600 12px/1 var(--font-phrase); letter-spacing: 0.22em; text-transform: uppercase; color: var(--neon); }
+  .letter-body { display: flex; flex-direction: column; gap: 1em; font: 500 clamp(21px, 5.4vw, 27px)/1.45 var(--font-letter); color: var(--petal); }
+  .letter-body p { margin: 0; text-wrap: pretty; }
+  .letter-sign { font: italic 500 clamp(20px, 5vw, 25px)/1.3 var(--font-letter); color: var(--blush); text-align: right; }
+  #close-letter {
+    align-self: flex-start;
+    font: 500 15px/1 var(--font-phrase); color: var(--blush);
+    background: transparent; border: 1px solid var(--hint); border-radius: 999px;
+    padding: 12px 20px; cursor: pointer;
+  }
+  #close-letter:focus-visible { outline: 2px solid var(--neon); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    #letter, .letter-inner { transition: none; }
+  }
+</style>
+
+<canvas id="heart" aria-label="Сердце из фразы «Я тебя люблю» на 36 языках"></canvas>
+<button id="open-letter" type="button" aria-label="Открыть послание"></button>
+<div class="hint">Нажми на экран</div>
+
+<section id="letter" hidden aria-label="Послание">
+  <div class="letter-inner">
+    <div class="letter-mark">2,5 года вместе</div>
+    <!-- ПОСЛАНИЕ: текст можно поменять прямо в этих абзацах -->
+    <div class="letter-body">
+      <p>С нашей годовщиной, котейка!</p>
+      <p>Два с половиной года вместе, и каждый день я снова выбираю тебя.</p>
+      <p>Желаю, чтобы рядом всегда было тепло, спокойно и весело, а всё задуманное сбывалось.</p>
+      <p>Я тебя очень-очень сильно люблю.</p>
+    </div>
+    <div class="letter-sign">— кот любимый</div>
+    <button id="close-letter" type="button">← Назад к сердцу</button>
+  </div>
+</section>
+
+<script>
+const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך"];
+// В основном неоново-красный, изредка светлые надписи — как в референсе
+const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
+const css = getComputedStyle(document.documentElement);
+const FONT = css.getPropertyValue("--font-phrase").trim();
+const NIGHT = css.getPropertyValue("--night").trim();
+const NEON = css.getPropertyValue("--neon").trim();
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const canvas = document.getElementById("heart");
+const ctx = canvas.getContext("2d");
+// Готовые надписи «запекаются» сюда один раз, чтобы не перерисовывать сотни слов каждый кадр
+const layer = document.createElement("canvas");
+const lctx = layer.getContext("2d");
+const openBtn = document.getElementById("open-letter");
+const letter = document.getElementById("letter");
+
+// Классическая параметрическая кривая сердца: x в [-16, 16], y в [-12, 17]
+function heartPoint(t) {
+  const x = 16 * Math.sin(t) ** 3;
+  const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+  return [x, -y];
+}
+
+let W = 0, H = 0, dpr = 1, unit = 1, cx = 0, cy = 0;
+let poly = [], words = [], next = 0, start = 0, doneAt = Infinity;
+const toScreen = (x, y) => [cx + x * unit, cy + y * unit];
+// Появление по одному — суть рисунка, поэтому оно есть всегда; при «уменьшить движение» убираем только всплытие, пульс и вспышки
+const FADE = 0.7;                             // сколько проявляется одно слово
+const OUTLINE_TIME = 4.5, FILL_TIME = 6.5;    // контур, затем середина
+
+function insidePoly(x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[j];
+    if ((y1 > y) !== (y2 > y) && x < x1 + (y - y1) * (x2 - x1) / (y2 - y1)) inside = !inside;
+  }
+  return inside;
+}
+
+function makeWord(x, y) {
+  const text = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+  const big = Math.random() < 0.18;
+  const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
+  ctx.font = `700 ${size}px ${FONT}`;
+  const w = ctx.measureText(text).width, h = size * 1.05, pad = size * 0.12;
+  return { text, size, x, y, w, h, l: x - w / 2 - pad, r: x + w / 2 + pad, t: y - h / 2, b: y + h / 2,
+           color: COLORS[Math.floor(Math.random() * COLORS.length)] };
+}
+const hits = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+
+// Вся раскладка считается заранее, а потом слова проявляются по одному в порядке очереди:
+// сначала по контуру (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз
+function buildPlan() {
+  const placed = [], fits = w => !placed.some(o => hits(o, w));
+  const ring = [];
+  for (let i = 0; i <= 900; i++) {
+    const [x, y] = toScreen(...heartPoint(2 * Math.PI * i / 900).map(v => v * 0.97));
+    const w = makeWord(x, y);
+    if (w.l > 4 && w.r < W - 4 && fits(w)) { placed.push(w); ring.push(w); }
+  }
+  const fill = [];
+  for (let misses = 0; misses < 2500;) {
+    const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
+    if (!insidePoly(x, y)) continue;
+    const w = makeWord(x, y);
+    const inside = insidePoly(w.l, w.t) && insidePoly(w.r, w.t) && insidePoly(w.l, w.b) && insidePoly(w.r, w.b);
+    if (inside && fits(w)) { placed.push(w); fill.push(w); misses = 0; }
+    else misses++;
+  }
+  fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
+  fill.sort((a, b) => a.order - b.order);
+
+  const t0 = 0.4, t1 = t0 + OUTLINE_TIME + 0.3;
+  ring.forEach((w, i) => { w.at = t0 + OUTLINE_TIME * i / ring.length; });
+  fill.forEach((w, i) => { w.at = t1 + FILL_TIME * i / fill.length; });
+  return [...ring, ...fill];
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  for (const c of [canvas, layer]) { c.width = W * dpr; c.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  unit = Math.min((W - 16) / 36, (H - 40) / 31);
+  cx = W / 2; cy = H / 2 - 2.5 * unit;
+  poly = Array.from({ length: 240 }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / 240)));
+
+  const r = unit * 5;
+  Object.assign(openBtn.style, { left: `${cx - r}px`, top: `${cy - r * 0.6}px`, width: `${r * 2}px`, height: `${r * 1.6}px` });
+
+  words = buildPlan(); next = 0; doneAt = Infinity;
+  start = performance.now() / 1000;
+  lctx.clearRect(0, 0, W, H);
+}
+
+function drawWord(c, w, alpha, glow, color = w.color, dy = 0) {
+  c.globalAlpha = alpha;
+  c.font = `700 ${w.size}px ${FONT}`;
+  c.fillStyle = color;
+  c.shadowColor = NEON;
+  c.shadowBlur = glow;
+  c.fillText(w.text, w.x, w.y + dy);
+}
+const easeOut = k => 1 - (1 - k) ** 3;
+
+function heartbeat(t) {
+  const p = t % 1.3;
+  return Math.exp(-(((p - 0.10) / 0.06) ** 2)) + 0.6 * Math.exp(-(((p - 0.32) / 0.07) ** 2));
+}
+
+// Маленькие сердечки от нажатия
+const bursts = [];
+canvas.addEventListener("pointerdown", e => {
+  for (let i = 0; i < 14; i++) {
+    const a = Math.random() * Math.PI * 2, v = 60 + Math.random() * 120;
+    bursts.push({ x: e.clientX, y: e.clientY, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60,
+                  born: performance.now() / 1000, size: 6 + Math.random() * 8, color: COLORS[i % COLORS.length] });
+  }
+});
+function tinyHeart(x, y, s) {
+  ctx.beginPath();
+  for (let i = 0; i <= 24; i++) {
+    const [hx, hy] = heartPoint(2 * Math.PI * i / 24);
+    const px = x + hx * s / 17, py = y + hy * s / 17;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.fill();
+}
+
+// Послание
+function showLetter() {
+  letter.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => letter.classList.add("shown")));
+  document.getElementById("close-letter").focus({ preventScroll: true });
+}
+function hideLetter() {
+  letter.classList.remove("shown");
+  setTimeout(() => { letter.hidden = true; }, reduceMotion ? 0 : 600);
+  openBtn.focus({ preventScroll: true });
+}
+openBtn.addEventListener("click", showLetter);
+document.getElementById("close-letter").addEventListener("click", hideLetter);
+addEventListener("keydown", e => { if (e.key === "Escape" && !letter.hidden) hideLetter(); });
+
+let last = performance.now() / 1000;
+const sparkles = [];
+function frame() {
+  const now = performance.now() / 1000, t = now - start, dt = Math.min(0.05, now - last);
+  last = now;
+  for (const c of [ctx, lctx]) { c.textAlign = "center"; c.textBaseline = "middle"; }
+
+  // Полностью проявившиеся слова «запекаем» в слой; живые — те, что между next и текущим моментом
+  while (next < words.length && t - words[next].at >= FADE) drawWord(lctx, words[next++], 1, unit * 0.35);
+  if (next === words.length && doneAt === Infinity) doneAt = now;
+
+  // Когда сердце собрано, оно мягко бьётся
+  const beat = !reduceMotion && now > doneAt ? heartbeat(now - doneAt) * Math.min(1, (now - doneAt) / 1.5) : 0;
+  const s = 1 + 0.03 * beat;
+
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.fillStyle = NIGHT;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(cx, cy + 2.5 * unit); ctx.scale(s, s); ctx.translate(-cx, -(cy + 2.5 * unit));
+  ctx.drawImage(layer, 0, 0, W, H);
+
+  // Новое слово всплывает снизу и разгорается: сначала светлое с сильным свечением, потом своего цвета
+  for (let i = next; i < words.length && words[i].at <= t; i++) {
+    const w = words[i], k = easeOut(Math.min(1, (t - w.at) / FADE));
+    drawWord(ctx, w, k, unit * (0.35 + 1.2 * (1 - k)), k < 0.5 ? "#ffe9ea" : w.color, reduceMotion ? 0 : (1 - k) * unit * 0.8);
+  }
+
+  // Редкие вспышки отдельных слов
+  if (now > doneAt && !reduceMotion && Math.random() < dt * 6) sparkles.push({ w: words[Math.floor(Math.random() * words.length)], born: now });
+  for (let i = sparkles.length - 1; i >= 0; i--) {
+    const sp = sparkles[i], age = now - sp.born;
+    if (age > 1.2) { sparkles.splice(i, 1); continue; }
+    drawWord(ctx, sp.w, Math.sin(Math.PI * age / 1.2), unit * 0.9, "#fff1f1");
+  }
+  ctx.restore();
+
+  ctx.shadowBlur = 0;
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const b = bursts[i], age = now - b.born;
+    if (age > 1.6) { bursts.splice(i, 1); continue; }
+    b.vy += 90 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    ctx.globalAlpha = 1 - age / 1.6;
+    ctx.fillStyle = b.color;
+    tinyHeart(b.x, b.y, b.size);
+  }
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+
+let resizeTimer = 0;
+// На iPhone «resize» приходит и когда прячется адресная строка — из-за этого не начинаем заново
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (Math.abs(innerWidth - W) > 1 || Math.abs(innerHeight - H) > 160) resize();
+  }, 150);
+});
+resize();
+requestAnimationFrame(frame);
+</script>
