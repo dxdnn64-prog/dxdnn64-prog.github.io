@@ -145,7 +145,7 @@ const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйе�
   "Volim te", "Обичам те", "Ľúbim ťa", "Ljubim te", "Ég elska þig", "T'estimo", "Maite zaitut", "Quérote", "Të dua",
   "Səni sevirəm", "Seni sevaman", "Мен сени сүйөм", "Би чамд хайртай", "دوستت دارم", "Mahal kita", "Ngiyakuthanda", "Inħobbok"];
 // Свои словечки: каждое ровно один раз, светлее остальных и вспыхивают чаще
-const PERSONAL = ["котейка", "кот любимый", "2,5 года", "моя котейка", "люблю тебя, котейка", "кошка", "любимая", "зайка", "любовка"];
+const PERSONAL = ["котейка", "2,5 года", "моя котейка", "люблю тебя, котейка", "кошка", "любимая", "зайка", "любовка"];
 const PERSONAL_COLOR = "#ffd9dc";
 // В основном неоново-красный, изредка светлые надписи — как в референсе
 const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
@@ -176,31 +176,23 @@ const toScreen = (x, y) => [cx + x * unit, cy + y * unit];
 const FADE = 0.7;                             // сколько проявляется одно слово
 const OUTLINE_TIME = 4.5, FILL_TIME = 6.5;    // контур, затем середина
 
-// Маска сердца: один байт на CSS-пиксель, «внутри ли точка» — это просто чтение из массива.
-// Раскладка проверяет десятки тысяч точек, и честная геометрия на 240 вершин замораживала страницу на секунды.
-// Две маски: точная форма — для середины, и чуть шире — для слов контура: они лишь
-// касаются края, чтобы силуэт был живым, но не рваным.
-const OVERHANG = 1.03;
-let mask = null, looseMask = null;
-function buildMask(scale) {
+// Маска сердца: один байт на CSS-пиксель — по ней строки узнают, где на их высоте края сердца
+let mask = null;
+function buildMask() {
   const m = document.createElement("canvas");
   m.width = W; m.height = H;
   const mc = m.getContext("2d");
   mc.beginPath();
-  poly.forEach(([x, y], i) => {
-    const px = cx + (x - cx) * scale, py = cy + (y - cy) * scale;
-    i ? mc.lineTo(px, py) : mc.moveTo(px, py);
-  });
+  poly.forEach(([x, y], i) => (i ? mc.lineTo(x, y) : mc.moveTo(x, y)));
   mc.closePath();
   mc.fill();
   const data = mc.getImageData(0, 0, W, H).data;
-  const out = new Uint8Array(W * H);
-  for (let i = 0; i < out.length; i++) out[i] = data[i * 4 + 3] > 127 ? 1 : 0;
-  return out;
+  mask = new Uint8Array(W * H);
+  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] > 127 ? 1 : 0;
 }
-function inHeart(x, y, m = mask) {
+function inHeart(x, y) {
   x |= 0; y |= 0;
-  return x >= 0 && y >= 0 && x < W && y < H && m[y * W + x] === 1;
+  return x >= 0 && y >= 0 && x < W && y < H && mask[y * W + x] === 1;
 }
 
 // Слово со своими точными габаритами. Размер берём из того, как браузер реально рисует текст:
@@ -263,207 +255,154 @@ function measure(text, size) {
   metrics.set(key, m);
   return m;
 }
-// Фразы берутся «из колоды»: все языки идут по кругу и встречаются примерно поровну.
-// Не легла фраза — уходит в конец колоды, а не теряется.
+// Фразы берутся «из колоды»: использованная уходит в конец, поэтому все языки встречаются
+// примерно поровну, а одна и та же фраза возвращается не раньше чем через десяток строк.
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-let deck = [], personalLeft = [];
-// На контуре — только небольшие слова почти одного кегля: так силуэт читается ровной линией.
-// Крупные и разные по размеру надписи живут внутри.
-// filler — мелкие слова для доводки: ими закрываются оставшиеся пустоты
-function makeWord(personalWord = false, edge = false, filler = false, forcedText = null) {
-  const mine = personalWord && personalLeft.length > 0;
-  const text = forcedText ?? (mine ? personalLeft[0] : deck[0]);
-  const big = !edge && !filler && Math.random() < 0.18;
-  const scale = edge ? 0.7 + Math.random() * 0.1
-    : filler ? 0.55 + Math.random() * 0.15
-    : big ? 0.95 + Math.random() * 0.25 : 0.62 + Math.random() * 0.28;
-  const size = Math.max(8, Math.round(unit * scale));
-  const m = measure(text, size);
-  // Половина зазора между соседями. Зазор должен быть виден глазом: неоновое свечение
-  // съедает пару пикселей с каждой стороны, и при меньшем зазоре слова выглядят слипшимися.
-  const padX = size * 0.13 + 0.8, padY = size * 0.08 + 0.5;
-  return { text, size, mine, left: m.left + padX, right: m.right + padX, asc: m.asc + padY, desc: m.desc + padY,
-           color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
-}
-// Ставит слово так, чтобы центр его рамки оказался в точке (bx, by)
-function placeAt(w, bx, by) {
-  w.x = bx - (w.right - w.left) / 2; w.y = by - (w.desc - w.asc) / 2;
-  w.l = w.x - w.left; w.r = w.x + w.right; w.t = w.y - w.asc; w.b = w.y + w.desc;
-  return w;
-}
-const hits = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
-// Рамка целиком внутри сердца: проверяем углы и точки по краям, иначе длинное слово
-// может перекрыть ложбинку сверху, хотя все четыре угла внутри
-function boxInside(w, m = mask) {
-  // Края рамки проверяем с шагом 2 px — дешёво благодаря маске
-  for (let x = w.l; x < w.r; x += 2) if (!inHeart(x, w.t, m) || !inHeart(x, w.b, m)) return false;
-  for (let y = w.t; y < w.b; y += 2) if (!inHeart(w.l, y, m) || !inHeart(w.r, y, m)) return false;
-  return inHeart(w.r, w.t, m) && inHeart(w.r, w.b, m);
+const widthOf = (text, size) => { const m = measure(text, size); return m.left + m.right; };
+
+// Отрезки строки внутри сердца: строка помещается там, где сердце закрывает всю её высоту.
+// Наверху таких отрезков два — по одному на каждую половинку.
+function rowSpans(top, bottom) {
+  const ys = [top, (top + bottom) / 2, bottom];
+  const spans = [];
+  let from = -1;
+  for (let x = 0; x <= W; x++) {
+    const ok = x < W && ys.every(y => inHeart(x, y));
+    if (ok && from < 0) from = x;
+    if (!ok && from >= 0) { spans.push([from, x - 1]); from = -1; }
+  }
+  return spans;
 }
 
-// Сетка для поиска соседей: слово сравнивается только с теми, кто лежит в тех же клетках
-function makeGrid(cell) {
-  const cells = new Map();
-  const each = (w, fn) => {
-    for (let gx = Math.floor(w.l / cell); gx <= Math.floor(w.r / cell); gx++)
-      for (let gy = Math.floor(w.t / cell); gy <= Math.floor(w.b / cell); gy++) fn(gx * 4096 + gy);
-  };
-  return {
-    fits(w) {
-      let ok = true;
-      each(w, k => { if (ok) for (const o of cells.get(k) || []) if (hits(o, w)) { ok = false; break; } });
-      return ok;
-    },
-    add(w) { each(w, k => { if (!cells.has(k)) cells.set(k, []); cells.get(k).push(w); }); },
-  };
+// Кегль строки: в основном мелкий и средний, изредка крупный — как в референсе
+function rowSize() {
+  const r = Math.random();
+  const k = r < 0.6 ? 0.74 + Math.random() * 0.08 : r < 0.9 ? 0.86 + Math.random() * 0.1 : 1.04 + Math.random() * 0.12;
+  return Math.max(9, Math.round(unit * k));
+}
+
+// Набор одного отрезка: подбираем фразы так, чтобы они заняли его почти целиком, а остаток
+// раздаём поровну между словами (выключка по ширине, как в книге). Крайние слова касаются
+// краёв сердца — поэтому силуэт ровный и симметричный, а пересечений не бывает по построению.
+// Каждая фраза — не больше трёх раз на сердце; иначе короткие («أحبك», «사랑해») заполоняют
+// узкие строки. Лимит снимается, только если в отрезок не влезает больше ничего.
+const MAX_USES = 3;
+function fillSpan(L, R, rowTop, rowBottom, baseSize, deck, forced, uses) {
+  for (const capped of [true, false]) {
+    const line = fillSpanOnce(L, R, rowTop, rowBottom, baseSize, deck.filter(t => !capped || (uses.get(t) || 0) < MAX_USES), forced);
+    if (line.length) {
+      line.forEach(w => {
+        if (w.mine) return;
+        uses.set(w.text, (uses.get(w.text) || 0) + 1);
+        deck.splice(deck.indexOf(w.text), 1); deck.push(w.text);
+      });
+      return line;
+    }
+  }
+  return [];
+}
+function fillSpanOnce(L, R, rowTop, rowBottom, baseSize, deck, forced) {
+  const avail = R - L, rowH = rowBottom - rowTop;
+  for (let size of [baseSize, Math.round(baseSize * 0.85), 9, 8]) {
+    const gap = size * 0.45 + 1;   // видимый просвет: неоновое свечение не должно склеивать соседей
+    const fitsRow = t => { const m = measure(t, size); return m.asc + m.desc <= rowH - 2; };
+    if (forced && (!fitsRow(forced) || widthOf(forced, size) > avail)) continue;
+    let best = null;
+    for (let trial = 0; trial < 24; trial++) {
+      const seq = forced ? [forced] : [];
+      let used = forced ? widthOf(forced, size) : 0;
+      // Сначала пробуем фразы из начала колоды (давно не было), потом остальные
+      const pool = [...shuffle(deck.slice(0, 16)), ...shuffle(deck.slice(16))];
+      for (const t of pool) {
+        if (!fitsRow(t)) continue;
+        const need = (seq.length ? gap : 0) + widthOf(t, size);
+        if (used + need <= avail) { seq.push(t); used += need; }
+      }
+      if (!seq.length) continue;
+      const leftover = avail - used;
+      if (!best || leftover < best.leftover) best = { seq, leftover, gap };
+      if (leftover < gap) break;
+    }
+    if (!best) continue;
+
+    // Слишком широкие просветы читаются как чёрные дыры. Тогда, как при вёрстке, набираем
+    // строку чуть крупнее (до +30%), чтобы слова заняли место сами, а не растянутыми пробелами.
+    const n = best.seq.length;
+    const lineWidth = sz => best.seq.reduce((sum, t) => sum + widthOf(t, sz), 0) + (n - 1) * (sz * 0.45 + 1);
+    if (n > 1 && best.leftover / (n - 1) > best.gap * 1.2) {
+      for (let sz = Math.floor(size * 1.3); sz > size; sz--) {
+        const fits = best.seq.every(t => { const m = measure(t, sz); return m.asc + m.desc <= rowH - 2; });
+        if (fits && lineWidth(sz) <= avail) {
+          size = sz; best.gap = sz * 0.45 + 1; best.leftover = avail - lineWidth(sz);
+          break;
+        }
+      }
+    }
+    const seq = shuffle(best.seq);
+    // Если и после этого просвет огромный (узкие строки у кончика), не растягиваем строку,
+    // а собираем слова по центру с обычным просветом — дыра посреди строки заметнее, чем у края
+    const spread = n > 1 && best.leftover / (n - 1) <= best.gap * 2.5;
+    const extra = spread ? best.leftover / (n - 1) : 0;
+    let x = spread ? L : L + best.leftover / 2;
+    const midY = (rowTop + rowBottom) / 2;
+    return seq.map(text => {
+      const m = measure(text, size), mine = text === forced;
+      const w = { text, size, mine, x: x + m.left, y: midY - (m.desc - m.asc) / 2,
+                  color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
+      w.l = x; w.r = x + m.left + m.right; w.t = w.y - m.asc; w.b = w.y + m.desc;
+      x = w.r + best.gap + extra;
+      return w;
+    });
+  }
+  return [];
 }
 
 // Вся раскладка считается заранее, а потом слова проявляются по одному в порядке очереди:
-// сначала вдоль контура (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз.
-// Слова контура слегка выступают за край, середина лежит строго внутри.
+// сначала вдоль контура (крайние слова строк, как перо от ложбинки по часовой стрелке),
+// затем середина сверху вниз.
 function buildPlan() {
-  const grid = makeGrid(Math.max(16, unit * 2));
-  deck = shuffle([...PHRASES]); personalLeft = shuffle([...PERSONAL]);
-  // Одинаковые фразы не ставим ближе этого расстояния друг к другу
-  const seen = new Map(), MIN_SAME = unit * 9, FILLER_SAME = unit * 6;
-  const farFromSame = (w, dist) => (seen.get(w.text) || []).every(([x, y]) => Math.hypot(x - w.x, y - w.y) > dist);
-  // "ok" — можно ставить; "busy" — место занято соседом; "bad" — фраза здесь не помещается вообще
-  // Проверки идут от дешёвых к дорогим: сосед по сетке, потом повторы, потом форма по маске
-  const check = (w, m, sameDist = MIN_SAME) => {
-    if (!(w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4)) return "bad";
-    if (!grid.fits(w)) return "busy";
-    return farFromSame(w, sameDist) && boxInside(w, m) ? "ok" : "bad";
-  };
-  const commit = (w, list) => {
-    grid.add(w); list.push(w);
-    if (!seen.has(w.text)) seen.set(w.text, []);
-    seen.get(w.text).push([w.x, w.y]);
-  };
-  const rotate = () => deck.push(deck.shift());
-  // Середина: не влезшая фраза пробует ещё несколько мест и только потом уступает очередь —
-  // иначе длинные фразы почти не попадали бы в сердце, а короткие повторялись
-  let tries = 0;
-  const tryPlace = (w, m, list) => {
-    const ok = check(w, m) === "ok";
-    if (w.mine) { const word = personalLeft.shift(); if (!ok) personalLeft.push(word); }
-    else if (ok || ++tries >= 25) { rotate(); tries = 0; }
-    if (ok) commit(w, list);
-    return ok;
-  };
-  const ring = [], STEPS = 720;
+  const deck = shuffle([...PHRASES]), uses = new Map();
+  const rows = [];
+  for (let y = cy - 12.3 * unit; ;) {
+    const size = rowSize(), h = size * 1.42;   // высота строки = кегль + ровный просвет между строками
+    if (y + h > cy + 17 * unit) break;
+    rows.push({ top: y, bottom: y + h, size });
+    y += h;
+  }
+  // Свои словечки — по одному на строку, равномерно по высоте, в широкой части сердца
+  const wide = rows.map((_, i) => i).filter(i => i > rows.length * 0.12 && i < rows.length * 0.78);
+  const mineAt = new Map();
+  shuffle([...PERSONAL]).forEach((t, k) => mineAt.set(wide[Math.floor((k + 0.5) * wide.length / PERSONAL.length)], t));
+
+  const STEPS = 720;
   const edge = Array.from({ length: STEPS }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / STEPS)));
-  // Нормаль к контуру в точке i, направленная внутрь сердца
-  const normal = i => {
-    const [px, py] = edge[i], [ax, ay] = edge[(i + STEPS - 1) % STEPS], [bx, by] = edge[(i + 1) % STEPS];
-    let nx = -(by - ay), ny = bx - ax;
-    const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
-    if (!inHeart(px + nx * 3, py + ny * 3)) { nx = -nx; ny = -ny; }
-    return [nx, ny];
+  const contourIndex = (x, y) => {
+    let best = 0, bd = Infinity;
+    edge.forEach(([ex, ey], i) => { const d = (ex - x) ** 2 + (ey - y) ** 2; if (d < bd) { bd = d; best = i; } });
+    return best;
   };
-  // Слово у края в точке i: почти целиком внутри, наружу заходит лишь самый край надписи
-  const edgeWord = (i, text = null) => {
-    const [px, py] = edge[i], [nx, ny] = normal(i);
-    const w = makeWord(false, true, false, text);
-    const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
-    const inset = halfN * 0.85 + unit * 0.05;
-    placeAt(w, px + nx * inset, py + ny * inset);
-    w.ci = i;   // место на контуре — по нему слова потом появляются по порядку
-    return w;
-  };
-  const edgeSize = Math.max(8, Math.round(unit * 0.75)), widthOf = t => measure(t, edgeSize).left + measure(t, edgeSize).right;
-  const byWidth = [...PHRASES].sort((a, b) => widthOf(a) - widthOf(b));
-  // Кончик сердца: одно короткое слово ровно по центральной оси, как можно ниже.
-  // Иначе слово у кончика ложится справа, заходит на левую сторону, и слева снизу остаётся дыра.
-  // То же для ложбинки сверху: там контур обходится от центра, и без такого слова слева остаётся просвет.
-  const anchorOnAxis = (ci, dir) => {
-    const [ax, ay] = edge[ci];
-    for (const text of byWidth.slice(0, 8)) {
-      const w = makeWord(false, true, false, text);
-      const half = (w.asc + w.desc) / 2;
-      for (let d = 0; d < unit * 4; d++) {
-        placeAt(w, ax, ay + dir * (d + half));
-        if (check(w, looseMask) === "ok") { w.ci = ci; commit(w, ring); return w; }
-      }
-    }
-    return null;
-  };
-  const tipWord = anchorOnAxis(STEPS / 2, -1);   // кончик: двигаемся вверх
-  anchorOnAxis(0, 1);                            // ложбинка: двигаемся вниз
-  // Контур идёт сплошной линией: если фраза здесь не помещается (длинная на крутом изгибе),
-  // сразу пробуем следующую, а если место просто занято соседом — ждём следующую точку
-  for (let i = 0; i < STEPS; i++) {
-    for (let k = 0; k < 6; k++) {
-      const w = edgeWord(i);
-      const res = check(w, looseMask);
-      if (res === "ok") { commit(w, ring); rotate(); break; }
-      if (res === "busy") break;
-      rotate();
-    }
-  }
-  // Ремонт контура: находим участки линии, которые ничем не закрыты, и вставляем туда
-  // самые короткие подходящие фразы — так сердце всегда обведено целиком, без дыр
-  const covered = () => {
-    const pad = unit * 0.7;
-    return edge.map(([x, y], i) => {
-      const [nx, ny] = normal(i), qx = x + nx * unit * 0.4, qy = y + ny * unit * 0.4;
-      return ring.some(w => qx > w.l - pad && qx < w.r + pad && qy > w.t - pad && qy < w.b + pad);
+  const ring = [], fill = [];
+  rows.forEach((row, ri) => {
+    const spans = rowSpans(row.top, row.bottom);
+    if (!spans.length) return;
+    let forced = mineAt.get(ri) ?? null;
+    const widest = spans.reduce((a, s, i) => (s[1] - s[0] > spans[a][1] - spans[a][0] ? i : a), 0);
+    spans.forEach(([L, R], si) => {
+      const line = fillSpan(L, R, row.top, row.bottom, row.size, deck, si === widest ? forced : null, uses);
+      if (!line.length) return;
+      if (si === widest && line.some(w => w.mine)) forced = null;
+      const midY = (row.top + row.bottom) / 2;
+      // Крайние слова отрезка рисуют контур; по точке на кривой они потом появляются по порядку
+      const first = line[0], last = line[line.length - 1];
+      first.ci = contourIndex(L, midY);
+      ring.push(first);
+      if (last !== first) { last.ci = contourIndex(R, midY); ring.push(last); }
+      line.slice(1, -1).forEach(w => fill.push(w));
     });
-  };
-  for (let pass = 0; pass < 3; pass++) {
-    const cov = covered();
-    let fixed = 0;
-    for (let i = 0; i < STEPS; i++) {
-      if (cov[i]) continue;
-      for (const text of byWidth) {
-        const w = edgeWord(i, text);
-        if (check(w, looseMask, FILLER_SAME) === "ok") { commit(w, ring); fixed++; break; }
-      }
-    }
-    if (!fixed) break;
-  }
+    // Не влезло в свою строку (бывает на узком экране) — словечко переезжает в следующую
+    if (forced && ri + 1 < rows.length && !mineAt.has(ri + 1)) mineAt.set(ri + 1, forced);
+  });
   ring.sort((a, b) => a.ci - b.ci);
-  const fill = [];
-  const randomPoint = () => {
-    for (;;) {
-      const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
-      if (inHeart(x, y)) return [x, y];
-    }
-  };
-  // Свои словечки ставим первыми, пока внутри много места, — так попадают все, по одному разу
-  for (let a = 0; personalLeft.length && a < 4000; a++) tryPlace(placeAt(makeWord(true), ...randomPoint()), mask, fill);
-  for (let misses = 0; misses < 8000;) {
-    if (tryPlace(placeAt(makeWord(), ...randomPoint()), mask, fill)) misses = 0;
-    else misses++;
-  }
-  // Доводка: проходим сердце мелкой сеткой и в каждую пустоту подбираем фразу, которая туда влезает.
-  // Случайные попытки выше оставляют дыры размером со слово — здесь они закрываются.
-  // В маленькую дыру лезут только короткие фразы, поэтому правило «одинаковые не рядом» тут мягче.
-  const step = Math.max(3, unit * 0.3);
-  for (let y = cy - 12.5 * unit; y < cy + 17 * unit; y += step) {
-    for (let x = cx - 16.5 * unit; x < cx + 16.5 * unit; x += step) {
-      if (!inHeart(x, y) || !grid.fits({ l: x - 1, r: x + 1, t: y - 1, b: y + 1 })) continue;   // точка уже занята
-      // Сначала пробуем самые редкие на этот момент фразы — чтобы доводка не плодила повторы коротких
-      // (24 самых редких хватает — перебор всех языков в каждой точке заметно тормозил раскладку)
-      const byRarity = shuffle([...PHRASES]).sort((a, b) => (seen.get(a)?.length || 0) - (seen.get(b)?.length || 0)).slice(0, 24);
-      for (const text of byRarity) {
-        const w = placeAt(makeWord(false, false, true, text), x, y);
-        if (check(w, mask, FILLER_SAME) === "ok") { commit(w, fill); break; }
-      }
-    }
-  }
-  // Подтяжка кончика: если над словом на кончике осталась пустая строка, поднимаем его
-  // вплотную к ближайшему слову сверху — иначе оно висит отдельно от сердца
-  if (tipWord) {
-    const all = [...ring, ...fill].filter(w => w !== tipWord);
-    const above = all.filter(o => o.b <= tipWord.t && o.l < tipWord.r && o.r > tipWord.l);
-    const nearest = above.reduce((a, o) => (!a || o.b > a.b ? o : a), null);
-    const lift = nearest ? tipWord.t - nearest.b : 0;
-    if (lift > 1) {
-      const moved = { ...tipWord };
-      placeAt(moved, (tipWord.l + tipWord.r) / 2, (tipWord.t + tipWord.b) / 2 - lift);
-      if (!all.some(o => hits(o, moved))) Object.assign(tipWord, moved);
-    }
-  }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
   fill.sort((a, b) => a.order - b.order);
 
@@ -479,11 +418,10 @@ function resize() {
   for (const c of [canvas, layer]) { c.width = W * dpr; c.height = H * dpr; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  unit = Math.min((W - 12) / 34.5, (H - 60) / 31.5);   // небольшой запас под слова, выступающие за контур
+  unit = Math.min((W - 16) / 32.4, (H - 60) / 30.5);   // слова лежат строго внутри контура
   cx = W / 2; cy = H / 2 - 2.5 * unit;
   poly = Array.from({ length: 240 }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / 240)));
-  mask = buildMask(1);
-  looseMask = buildMask(OVERHANG);
+  buildMask();
 
   // Невидимая кнопка — в середине сердца, с запасом под палец
   const bw = Math.max(unit * 9, 120), bh = Math.max(unit * 5.6, 88), by = cy + unit;
