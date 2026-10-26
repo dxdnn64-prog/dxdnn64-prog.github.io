@@ -209,29 +209,25 @@ const metrics = new Map();
 // Поэтому фраза рисуется в скрытый холст, и границы берутся по реально закрашенным пикселям.
 const probe = document.createElement("canvas");
 const pctx = probe.getContext("2d", { willReadFrequently: true });
-// Каждая фраза меряется один раз в крупном кегле, остальные размеры — пропорционально:
-// замер пикселями дорогой, а габариты текста растут линейно с кеглем.
-const REF_SIZE = 48;
+// Мерить надо в том же кегле и той же плотности пикселей, в которых фраза рисуется:
+// системный шрифт iPhone меняет начертание с размером (мелкий текст шире и разреженнее),
+// поэтому пропорциональный пересчёт из крупного кегля занижал ширину мелких надписей.
 function measure(text, size) {
-  const ref = measureRef(text), k = size / REF_SIZE;
-  return { left: ref.left * k, right: ref.right * k, asc: ref.asc * k, desc: ref.desc * k };
-}
-const PROBE_SCALE = 1;
-function measureRef(text) {
-  const size = REF_SIZE, key = text;
+  const PROBE_SCALE = Math.min(dpr, 2);   // выше двух точность уже не растёт, а замер дорожает
+  const key = text + "|" + size + "|" + PROBE_SCALE;
   let m = metrics.get(key);
   if (m) return m;
   const font = `700 ${size}px ${FONT}`;
   pctx.font = font;
-  const guessW = Math.ceil(pctx.measureText(text).width * 1.6 + size * 4);
-  const cw = guessW * PROBE_SCALE, ch = Math.ceil(size * 4) * PROBE_SCALE;
+  const guessW = Math.ceil(pctx.measureText(text).width * 1.3 + size * 3);
+  const cw = Math.ceil(guessW * PROBE_SCALE), ch = Math.ceil(size * 3 * PROBE_SCALE);
   if (probe.width < cw) probe.width = cw;
   if (probe.height < ch) probe.height = ch;
   pctx.setTransform(1, 0, 0, 1, 0, 0);
   pctx.clearRect(0, 0, probe.width, probe.height);
   pctx.setTransform(PROBE_SCALE, 0, 0, PROBE_SCALE, 0, 0);
   pctx.font = font; pctx.textAlign = "center"; pctx.textBaseline = "middle"; pctx.fillStyle = "#000";
-  const ox = guessW / 2, oy = size * 2;
+  const ox = guessW / 2, oy = size * 1.5;
   pctx.fillText(text, ox, oy);
   const data = pctx.getImageData(0, 0, cw, ch).data;
   let minX = cw, maxX = -1, minY = ch, maxY = -1;
@@ -357,7 +353,8 @@ function buildPlan() {
     w.ci = i;   // место на контуре — по нему слова потом появляются по порядку
     return w;
   };
-  const byWidth = [...PHRASES].sort((a, b) => (measureRef(a).left + measureRef(a).right) - (measureRef(b).left + measureRef(b).right));
+  const edgeSize = Math.max(8, Math.round(unit * 0.75)), widthOf = t => measure(t, edgeSize).left + measure(t, edgeSize).right;
+  const byWidth = [...PHRASES].sort((a, b) => widthOf(a) - widthOf(b));
   // Кончик сердца: одно короткое слово ровно по центральной оси, как можно ниже.
   // Иначе слово у кончика ложится справа, заходит на левую сторону, и слева снизу остаётся дыра.
   // То же для ложбинки сверху: там контур обходится от центра, и без такого слова слева остаётся просвет.
@@ -368,12 +365,13 @@ function buildPlan() {
       const half = (w.asc + w.desc) / 2;
       for (let d = 0; d < unit * 4; d++) {
         placeAt(w, ax, ay + dir * (d + half));
-        if (check(w, looseMask) === "ok") { w.ci = ci; commit(w, ring); return; }
+        if (check(w, looseMask) === "ok") { w.ci = ci; commit(w, ring); return w; }
       }
     }
+    return null;
   };
-  anchorOnAxis(STEPS / 2, -1);   // кончик: двигаемся вверх
-  anchorOnAxis(0, 1);            // ложбинка: двигаемся вниз
+  const tipWord = anchorOnAxis(STEPS / 2, -1);   // кончик: двигаемся вверх
+  anchorOnAxis(0, 1);                            // ложбинка: двигаемся вниз
   // Контур идёт сплошной линией: если фраза здесь не помещается (длинная на крутом изгибе),
   // сразу пробуем следующую, а если место просто занято соседом — ждём следующую точку
   for (let i = 0; i < STEPS; i++) {
@@ -433,6 +431,19 @@ function buildPlan() {
         const w = placeAt(makeWord(false, false, true, text), x, y);
         if (check(w, mask, FILLER_SAME) === "ok") { commit(w, fill); break; }
       }
+    }
+  }
+  // Подтяжка кончика: если над словом на кончике осталась пустая строка, поднимаем его
+  // вплотную к ближайшему слову сверху — иначе оно висит отдельно от сердца
+  if (tipWord) {
+    const all = [...ring, ...fill].filter(w => w !== tipWord);
+    const above = all.filter(o => o.b <= tipWord.t && o.l < tipWord.r && o.r > tipWord.l);
+    const nearest = above.reduce((a, o) => (!a || o.b > a.b ? o : a), null);
+    const lift = nearest ? tipWord.t - nearest.b : 0;
+    if (lift > 1) {
+      const moved = { ...tipWord };
+      placeAt(moved, (tipWord.l + tipWord.r) / 2, (tipWord.t + tipWord.b) / 2 - lift);
+      if (!all.some(o => hits(o, moved))) Object.assign(tipWord, moved);
     }
   }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
