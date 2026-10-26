@@ -223,14 +223,17 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.f
 let deck = [], personalLeft = [];
 // На контуре — только небольшие слова почти одного кегля: так силуэт читается ровной линией.
 // Крупные и разные по размеру надписи живут внутри.
-function makeWord(personalWord = false, edge = false) {
+// filler — мелкие слова для доводки: ими закрываются оставшиеся пустоты
+function makeWord(personalWord = false, edge = false, filler = false, forcedText = null) {
   const mine = personalWord && personalLeft.length > 0;
-  const text = mine ? personalLeft[0] : deck[0];
-  const big = !edge && Math.random() < 0.18;
-  const scale = edge ? 0.7 + Math.random() * 0.1 : big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28;
+  const text = forcedText ?? (mine ? personalLeft[0] : deck[0]);
+  const big = !edge && !filler && Math.random() < 0.18;
+  const scale = edge ? 0.7 + Math.random() * 0.1
+    : filler ? 0.5 + Math.random() * 0.15
+    : big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28;
   const size = Math.max(8, Math.round(unit * scale));
   const m = measure(text, size);
-  const padX = size * 0.13, padY = size * 0.07;   // половина зазора между соседями
+  const padX = size * 0.09, padY = size * 0.04;   // половина зазора между соседями
   return { text, size, mine, left: m.left + padX, right: m.right + padX, asc: m.asc + padY, desc: m.desc + padY,
            color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
 }
@@ -275,11 +278,13 @@ function buildPlan() {
   deck = shuffle([...PHRASES]); personalLeft = shuffle([...PERSONAL]);
   // Одинаковые фразы не ставим ближе этого расстояния друг к другу
   const seen = new Map(), MIN_SAME = unit * 9;
-  const farFromSame = w => (seen.get(w.text) || []).every(([x, y]) => Math.hypot(x - w.x, y - w.y) > MIN_SAME);
+  const farFromSame = (w, dist) => (seen.get(w.text) || []).every(([x, y]) => Math.hypot(x - w.x, y - w.y) > dist);
   // "ok" — можно ставить; "busy" — место занято соседом; "bad" — фраза здесь не помещается вообще
-  const check = (w, m) => {
-    if (!(w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4 && boxInside(w, m) && farFromSame(w))) return "bad";
-    return grid.fits(w) ? "ok" : "busy";
+  // Проверки идут от дешёвых к дорогим: сосед по сетке, потом повторы, потом форма по маске
+  const check = (w, m, sameDist = MIN_SAME) => {
+    if (!(w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4)) return "bad";
+    if (!grid.fits(w)) return "busy";
+    return farFromSame(w, sameDist) && boxInside(w, m) ? "ok" : "bad";
   };
   const commit = (w, list) => {
     grid.add(w); list.push(w);
@@ -331,6 +336,21 @@ function buildPlan() {
   for (let misses = 0; misses < 8000;) {
     if (tryPlace(placeAt(makeWord(), ...randomPoint()), mask, fill)) misses = 0;
     else misses++;
+  }
+  // Доводка: проходим сердце мелкой сеткой и в каждую пустоту подбираем фразу, которая туда влезает.
+  // Случайные попытки выше оставляют дыры размером со слово — здесь они закрываются.
+  // В маленькую дыру лезут только короткие фразы, поэтому правило «одинаковые не рядом» тут мягче.
+  const step = Math.max(3, unit * 0.3), FILLER_SAME = unit * 6;
+  for (let y = cy - 12.5 * unit; y < cy + 17 * unit; y += step) {
+    for (let x = cx - 16.5 * unit; x < cx + 16.5 * unit; x += step) {
+      if (!inHeart(x, y) || !grid.fits({ l: x - 1, r: x + 1, t: y - 1, b: y + 1 })) continue;   // точка уже занята
+      // Сначала пробуем самые редкие на этот момент фразы — чтобы доводка не плодила повторы коротких
+      const byRarity = shuffle([...PHRASES]).sort((a, b) => (seen.get(a)?.length || 0) - (seen.get(b)?.length || 0));
+      for (const text of byRarity) {
+        const w = placeAt(makeWord(false, false, true, text), x, y);
+        if (check(w, mask, FILLER_SAME) === "ok") { commit(w, fill); break; }
+      }
+    }
   }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
   fill.sort((a, b) => a.order - b.order);
