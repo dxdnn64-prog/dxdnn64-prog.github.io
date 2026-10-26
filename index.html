@@ -221,8 +221,8 @@ function measure(text, size) {
 // Не легла фраза — уходит в конец колоды, а не теряется.
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 let deck = [], personalLeft = [];
-function makeWord(allowPersonal) {
-  const mine = allowPersonal && personalLeft.length > 0 && Math.random() < 0.1;
+function makeWord(personalWord = false) {
+  const mine = personalWord && personalLeft.length > 0;
   const text = mine ? personalLeft[0] : deck[0];
   const big = Math.random() < 0.18;
   const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
@@ -278,7 +278,7 @@ function buildPlan() {
   let tries = 0;
   const tryPlace = (w, m, list) => {
     const ok = w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4 && boxInside(w, m) && grid.fits(w) && farFromSame(w);
-    if (w.mine) { if (ok) personalLeft.shift(); }
+    if (w.mine) { const word = personalLeft.shift(); if (!ok) personalLeft.push(word); }
     else if (ok || ++tries >= 25) { deck.push(deck.shift()); tries = 0; }
     if (!ok) return false;
     grid.add(w); list.push(w);
@@ -302,10 +302,16 @@ function buildPlan() {
     tryPlace(w, looseMask, ring);
   }
   const fill = [];
+  const randomPoint = () => {
+    for (;;) {
+      const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
+      if (inHeart(x, y)) return [x, y];
+    }
+  };
+  // Свои словечки ставим первыми, пока внутри много места, — так попадают все, по одному разу
+  for (let a = 0; personalLeft.length && a < 4000; a++) tryPlace(placeAt(makeWord(true), ...randomPoint()), mask, fill);
   for (let misses = 0; misses < 8000;) {
-    const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
-    if (!inHeart(x, y)) continue;
-    if (tryPlace(placeAt(makeWord(true), x, y), mask, fill)) misses = 0;
+    if (tryPlace(placeAt(makeWord(), ...randomPoint()), mask, fill)) misses = 0;
     else misses++;
   }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
