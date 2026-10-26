@@ -141,8 +141,8 @@
 
 <script>
 const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך"];
-// Свои словечки: попадаются реже, светлее и вспыхивают чаще остальных
-const PERSONAL = ["котейка", "кот любимый", "2,5 года", "мой котейка", "люблю тебя, котейка"];
+// Свои словечки: каждое ровно один раз, светлее остальных и вспыхивают чаще
+const PERSONAL = ["котейка", "кот любимый", "2,5 года", "мой котейка", "люблю тебя, котейка", "кошка", "любимая"];
 const PERSONAL_COLOR = "#ffd9dc";
 // В основном неоново-красный, изредка светлые надписи — как в референсе
 const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
@@ -175,22 +175,29 @@ const OUTLINE_TIME = 4.5, FILL_TIME = 6.5;    // контур, затем сер
 
 // Маска сердца: один байт на CSS-пиксель, «внутри ли точка» — это просто чтение из массива.
 // Раскладка проверяет десятки тысяч точек, и честная геометрия на 240 вершин замораживала страницу на секунды.
-let mask = null;
-function buildMask() {
+// Две маски: точная форма — для середины, и чуть шире — для слов контура: им можно
+// немного выступать наружу, как в референсе, иначе край выглядит слишком ровным.
+const OVERHANG = 1.08;
+let mask = null, looseMask = null;
+function buildMask(scale) {
   const m = document.createElement("canvas");
   m.width = W; m.height = H;
   const mc = m.getContext("2d");
   mc.beginPath();
-  poly.forEach(([x, y], i) => (i ? mc.lineTo(x, y) : mc.moveTo(x, y)));
+  poly.forEach(([x, y], i) => {
+    const px = cx + (x - cx) * scale, py = cy + (y - cy) * scale;
+    i ? mc.lineTo(px, py) : mc.moveTo(px, py);
+  });
   mc.closePath();
   mc.fill();
   const data = mc.getImageData(0, 0, W, H).data;
-  mask = new Uint8Array(W * H);
-  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+  const out = new Uint8Array(W * H);
+  for (let i = 0; i < out.length; i++) out[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+  return out;
 }
-function inHeart(x, y) {
+function inHeart(x, y, m = mask) {
   x |= 0; y |= 0;
-  return x >= 0 && y >= 0 && x < W && y < H && mask[y * W + x] === 1;
+  return x >= 0 && y >= 0 && x < W && y < H && m[y * W + x] === 1;
 }
 
 // Слово со своими точными габаритами. Размер берём из того, как браузер реально рисует текст:
@@ -210,10 +217,13 @@ function measure(text, size) {
   }
   return m;
 }
-function makeWord() {
-  const mine = Math.random() < 0.07;
-  const pool = mine ? PERSONAL : PHRASES;
-  const text = pool[Math.floor(Math.random() * pool.length)];
+// Фразы берутся «из колоды»: все языки идут по кругу и встречаются примерно поровну.
+// Не легла фраза — уходит в конец колоды, а не теряется.
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+let deck = [], personalLeft = [];
+function makeWord(allowPersonal) {
+  const mine = allowPersonal && personalLeft.length > 0 && Math.random() < 0.1;
+  const text = mine ? personalLeft[0] : deck[0];
   const big = Math.random() < 0.18;
   const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
   const m = measure(text, size);
@@ -230,11 +240,11 @@ function placeAt(w, bx, by) {
 const hits = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
 // Рамка целиком внутри сердца: проверяем углы и точки по краям, иначе длинное слово
 // может перекрыть ложбинку сверху, хотя все четыре угла внутри
-function boxInside(w) {
+function boxInside(w, m = mask) {
   // Края рамки проверяем с шагом 2 px — дешёво благодаря маске
-  for (let x = w.l; x < w.r; x += 2) if (!inHeart(x, w.t) || !inHeart(x, w.b)) return false;
-  for (let y = w.t; y < w.b; y += 2) if (!inHeart(w.l, y) || !inHeart(w.r, y)) return false;
-  return inHeart(w.r, w.t) && inHeart(w.r, w.b);
+  for (let x = w.l; x < w.r; x += 2) if (!inHeart(x, w.t, m) || !inHeart(x, w.b, m)) return false;
+  for (let y = w.t; y < w.b; y += 2) if (!inHeart(w.l, y, m) || !inHeart(w.r, y, m)) return false;
+  return inHeart(w.r, w.t, m) && inHeart(w.r, w.b, m);
 }
 
 // Сетка для поиска соседей: слово сравнивается только с теми, кто лежит в тех же клетках
@@ -256,10 +266,26 @@ function makeGrid(cell) {
 
 // Вся раскладка считается заранее, а потом слова проявляются по одному в порядке очереди:
 // сначала вдоль контура (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз.
-// Все слова лежат строго внутри контура, поэтому край сердца ровный.
+// Слова контура слегка выступают за край, середина лежит строго внутри.
 function buildPlan() {
   const grid = makeGrid(Math.max(16, unit * 2));
-  const fits = w => grid.fits(w);
+  deck = shuffle([...PHRASES]); personalLeft = shuffle([...PERSONAL]);
+  // Одинаковые фразы не ставим ближе этого расстояния друг к другу
+  const seen = new Map(), MIN_SAME = unit * 9;
+  const farFromSame = w => (seen.get(w.text) || []).every(([x, y]) => Math.hypot(x - w.x, y - w.y) > MIN_SAME);
+  // Не влезшая фраза пробует ещё несколько мест и только потом уступает очередь —
+  // иначе длинные фразы почти не попадали бы в сердце, а короткие повторялись
+  let tries = 0;
+  const tryPlace = (w, m, list) => {
+    const ok = w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4 && boxInside(w, m) && grid.fits(w) && farFromSame(w);
+    if (w.mine) { if (ok) personalLeft.shift(); }
+    else if (ok || ++tries >= 25) { deck.push(deck.shift()); tries = 0; }
+    if (!ok) return false;
+    grid.add(w); list.push(w);
+    if (!seen.has(w.text)) seen.set(w.text, []);
+    seen.get(w.text).push([w.x, w.y]);
+    return true;
+  };
   const ring = [], STEPS = 720;
   const edge = Array.from({ length: STEPS }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / STEPS)));
   for (let i = 0; i < STEPS; i++) {
@@ -268,17 +294,18 @@ function buildPlan() {
     let nx = -(by - ay), ny = bx - ax;
     const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
     if (!inHeart(px + nx * 3, py + ny * 3)) { nx = -nx; ny = -ny; }
-    const w = makeWord();
+    const w = makeWord(false);
     const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
-    placeAt(w, px + nx * (halfN + unit * 0.12), py + ny * (halfN + unit * 0.12));
-    if (boxInside(w) && fits(w)) { grid.add(w); ring.push(w); }
+    // Центр слова чуть внутри контура: примерно треть надписи выступает наружу
+    const inset = halfN * 0.4 + unit * 0.1;
+    placeAt(w, px + nx * inset, py + ny * inset);
+    tryPlace(w, looseMask, ring);
   }
   const fill = [];
   for (let misses = 0; misses < 8000;) {
     const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
     if (!inHeart(x, y)) continue;
-    const w = placeAt(makeWord(), x, y);
-    if (boxInside(w) && fits(w)) { grid.add(w); fill.push(w); misses = 0; }
+    if (tryPlace(placeAt(makeWord(true), x, y), mask, fill)) misses = 0;
     else misses++;
   }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
@@ -296,10 +323,11 @@ function resize() {
   for (const c of [canvas, layer]) { c.width = W * dpr; c.height = H * dpr; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  unit = Math.min((W - 12) / 32.6, (H - 60) / 30);   // слова теперь целиком внутри контура, запас по краям не нужен
+  unit = Math.min((W - 12) / 34.5, (H - 60) / 31.5);   // небольшой запас под слова, выступающие за контур
   cx = W / 2; cy = H / 2 - 2.5 * unit;
   poly = Array.from({ length: 240 }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / 240)));
-  buildMask();
+  mask = buildMask(1);
+  looseMask = buildMask(OVERHANG);
 
   // Невидимая кнопка — в середине сердца, с запасом под палец
   const bw = Math.max(unit * 9, 120), bh = Math.max(unit * 5.6, 88), by = cy + unit;
