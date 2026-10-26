@@ -119,7 +119,7 @@
 </style>
 </head>
 <body>
-<canvas id="heart" aria-label="Сердце из фразы «Я тебя люблю» на 36 языках"></canvas>
+<canvas id="heart" aria-label="Сердце из фразы «Я тебя люблю» на 53 языках"></canvas>
 <button id="open-letter" type="button" aria-label="Открыть послание"></button>
 <div class="hint">Нажми на экран</div>
 
@@ -140,9 +140,12 @@
 </section>
 
 <script>
-const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך"];
+const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך",
+  // Ещё языки — в основном короткие фразы, ими хорошо закрываются маленькие пустоты
+  "Volim te", "Обичам те", "Ľúbim ťa", "Ljubim te", "Ég elska þig", "T'estimo", "Maite zaitut", "Quérote", "Të dua",
+  "Səni sevirəm", "Seni sevaman", "Мен сени сүйөм", "Би чамд хайртай", "دوستت دارم", "Mahal kita", "Ngiyakuthanda", "Inħobbok"];
 // Свои словечки: каждое ровно один раз, светлее остальных и вспыхивают чаще
-const PERSONAL = ["котейка", "кот любимый", "2,5 года", "моя котейка", "люблю тебя, котейка", "кошка", "любимая"];
+const PERSONAL = ["котейка", "кот любимый", "2,5 года", "моя котейка", "люблю тебя, котейка", "кошка", "любимая", "зайка", "любовка"];
 const PERSONAL_COLOR = "#ffd9dc";
 // В основном неоново-красный, изредка светлые надписи — как в референсе
 const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
@@ -212,6 +215,9 @@ const pctx = probe.getContext("2d", { willReadFrequently: true });
 // Мерить надо в том же кегле и той же плотности пикселей, в которых фраза рисуется:
 // системный шрифт iPhone меняет начертание с размером (мелкий текст шире и разреженнее),
 // поэтому пропорциональный пересчёт из крупного кегля занижал ширину мелких надписей.
+// Латиница, кириллица и греческий рисуются основным шрифтом — для них measureText в реальном
+// кегле точен и дёшев. Пиксельный замер нужен только письменностям с запасным шрифтом.
+const SIMPLE_SCRIPT = /^[ -ɏͰ-ϿЀ-ӿḀ-ỿ’]+$/;
 function measure(text, size) {
   const PROBE_SCALE = Math.min(dpr, 2);   // выше двух точность уже не растёт, а замер дорожает
   const key = text + "|" + size + "|" + PROBE_SCALE;
@@ -219,6 +225,16 @@ function measure(text, size) {
   if (m) return m;
   const font = `700 ${size}px ${FONT}`;
   pctx.font = font;
+  if (SIMPLE_SCRIPT.test(text)) {
+    pctx.textAlign = "center"; pctx.textBaseline = "middle";
+    const r = pctx.measureText(text);
+    if (r.actualBoundingBoxRight !== undefined) {
+      m = { left: r.actualBoundingBoxLeft, right: r.actualBoundingBoxRight,
+            asc: r.actualBoundingBoxAscent, desc: r.actualBoundingBoxDescent };
+      metrics.set(key, m);
+      return m;
+    }
+  }
   const guessW = Math.ceil(pctx.measureText(text).width * 1.3 + size * 3);
   const cw = Math.ceil(guessW * PROBE_SCALE), ch = Math.ceil(size * 3 * PROBE_SCALE);
   if (probe.width < cw) probe.width = cw;
@@ -259,12 +275,13 @@ function makeWord(personalWord = false, edge = false, filler = false, forcedText
   const text = forcedText ?? (mine ? personalLeft[0] : deck[0]);
   const big = !edge && !filler && Math.random() < 0.18;
   const scale = edge ? 0.7 + Math.random() * 0.1
-    : filler ? 0.5 + Math.random() * 0.15
-    : big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28;
+    : filler ? 0.55 + Math.random() * 0.15
+    : big ? 0.95 + Math.random() * 0.25 : 0.62 + Math.random() * 0.28;
   const size = Math.max(8, Math.round(unit * scale));
   const m = measure(text, size);
-  // Половина зазора между соседями; +0.5 px на округление пикселей при мелком кегле
-  const padX = size * 0.09 + 0.5, padY = size * 0.04 + 0.5;
+  // Половина зазора между соседями. Зазор должен быть виден глазом: неоновое свечение
+  // съедает пару пикселей с каждой стороны, и при меньшем зазоре слова выглядят слипшимися.
+  const padX = size * 0.13 + 0.8, padY = size * 0.08 + 0.5;
   return { text, size, mine, left: m.left + padX, right: m.right + padX, asc: m.asc + padY, desc: m.desc + padY,
            color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
 }
@@ -426,7 +443,8 @@ function buildPlan() {
     for (let x = cx - 16.5 * unit; x < cx + 16.5 * unit; x += step) {
       if (!inHeart(x, y) || !grid.fits({ l: x - 1, r: x + 1, t: y - 1, b: y + 1 })) continue;   // точка уже занята
       // Сначала пробуем самые редкие на этот момент фразы — чтобы доводка не плодила повторы коротких
-      const byRarity = shuffle([...PHRASES]).sort((a, b) => (seen.get(a)?.length || 0) - (seen.get(b)?.length || 0));
+      // (24 самых редких хватает — перебор всех языков в каждой точке заметно тормозил раскладку)
+      const byRarity = shuffle([...PHRASES]).sort((a, b) => (seen.get(a)?.length || 0) - (seen.get(b)?.length || 0)).slice(0, 24);
       for (const text of byRarity) {
         const w = placeAt(makeWord(false, false, true, text), x, y);
         if (check(w, mask, FILLER_SAME) === "ok") { commit(w, fill); break; }
@@ -598,7 +616,7 @@ function frame() {
   // Полностью проявившиеся слова «запекаем» в слой; живые — те, что между next и текущим моментом
   while (next < words.length && t - words[next].at >= FADE) {
     const w = words[next++];
-    drawWord(lctx, w, 1, unit * (w.mine ? 0.9 : 0.35));
+    drawWord(lctx, w, 1, unit * (w.mine ? 0.7 : 0.22));   // свечение тоньше, чтобы соседи не сливались
   }
   if (next === words.length && doneAt === Infinity) doneAt = now;
 
@@ -616,7 +634,7 @@ function frame() {
   // Новое слово всплывает снизу и разгорается: сначала светлое с сильным свечением, потом своего цвета
   for (let i = next; i < words.length && words[i].at <= t; i++) {
     const w = words[i], k = easeOut(Math.min(1, (t - w.at) / FADE));
-    drawWord(ctx, w, k, unit * (0.35 + 1.2 * (1 - k)), k < 0.5 ? "#ffe9ea" : w.color, reduceMotion ? 0 : (1 - k) * unit * 0.8);
+    drawWord(ctx, w, k, unit * ((w.mine ? 0.7 : 0.22) + 1.2 * (1 - k)), k < 0.5 ? "#ffe9ea" : w.color, reduceMotion ? 0 : (1 - k) * unit * 0.8);
   }
 
   // Редкие вспышки отдельных слов; свои словечки вспыхивают в половине случаев
