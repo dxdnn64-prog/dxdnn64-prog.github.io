@@ -149,9 +149,7 @@ const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b"
 const css = getComputedStyle(document.documentElement);
 const FONT = css.getPropertyValue("--font-phrase").trim();
 const NIGHT = css.getPropertyValue("--night").trim();
-const NEON = css.getPropertyValue("--neon").trim();
-const LETTER_FONT = css.getPropertyValue("--font-letter").trim();
-const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NEON = css.getPropertyValue("--neon").trim();const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const canvas = document.getElementById("heart");
 const ctx = canvas.getContext("2d");
@@ -169,52 +167,118 @@ function heartPoint(t) {
 }
 
 let W = 0, H = 0, dpr = 1, unit = 1, cx = 0, cy = 0;
-let poly = [], words = [], personal = [], next = 0, start = 0, doneAt = Infinity, hint = null;
+let poly = [], words = [], personal = [], next = 0, start = 0, doneAt = Infinity;
 const toScreen = (x, y) => [cx + x * unit, cy + y * unit];
 // Появление по одному — суть рисунка, поэтому оно есть всегда; при «уменьшить движение» убираем только всплытие, пульс и вспышки
 const FADE = 0.7;                             // сколько проявляется одно слово
 const OUTLINE_TIME = 4.5, FILL_TIME = 6.5;    // контур, затем середина
 
-function insidePoly(x, y) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [x1, y1] = poly[i], [x2, y2] = poly[j];
-    if ((y1 > y) !== (y2 > y) && x < x1 + (y - y1) * (x2 - x1) / (y2 - y1)) inside = !inside;
-  }
-  return inside;
+// Маска сердца: один байт на CSS-пиксель, «внутри ли точка» — это просто чтение из массива.
+// Раскладка проверяет десятки тысяч точек, и честная геометрия на 240 вершин замораживала страницу на секунды.
+let mask = null;
+function buildMask() {
+  const m = document.createElement("canvas");
+  m.width = W; m.height = H;
+  const mc = m.getContext("2d");
+  mc.beginPath();
+  poly.forEach(([x, y], i) => (i ? mc.lineTo(x, y) : mc.moveTo(x, y)));
+  mc.closePath();
+  mc.fill();
+  const data = mc.getImageData(0, 0, W, H).data;
+  mask = new Uint8Array(W * H);
+  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+}
+function inHeart(x, y) {
+  x |= 0; y |= 0;
+  return x >= 0 && y >= 0 && x < W && y < H && mask[y * W + x] === 1;
 }
 
-function makeWord(x, y) {
+// Слово со своими точными габаритами. Размер берём из того, как браузер реально рисует текст:
+// у хинди, тайского и других письменностей знаки выходят выше и ниже строки, и по одной ширине
+// и кеглю их не оценить — именно из-за этого раньше надписи налезали друг на друга.
+const metrics = new Map();
+function measure(text, size) {
+  const key = text + "|" + size;
+  let m = metrics.get(key);
+  if (!m) {
+    ctx.font = `700 ${size}px ${FONT}`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const r = ctx.measureText(text);
+    m = { left: r.actualBoundingBoxLeft ?? r.width / 2, right: r.actualBoundingBoxRight ?? r.width / 2,
+          asc: r.actualBoundingBoxAscent ?? size * 0.55, desc: r.actualBoundingBoxDescent ?? size * 0.3 };
+    metrics.set(key, m);
+  }
+  return m;
+}
+function makeWord() {
   const mine = Math.random() < 0.07;
   const pool = mine ? PERSONAL : PHRASES;
   const text = pool[Math.floor(Math.random() * pool.length)];
   const big = Math.random() < 0.18;
   const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
-  ctx.font = `700 ${size}px ${FONT}`;
-  const w = ctx.measureText(text).width, h = size * 1.05, pad = size * 0.12;
-  return { text, size, x, y, w, h, l: x - w / 2 - pad, r: x + w / 2 + pad, t: y - h / 2, b: y + h / 2, mine,
+  const m = measure(text, size);
+  const padX = size * 0.13, padY = size * 0.07;   // половина зазора между соседями
+  return { text, size, mine, left: m.left + padX, right: m.right + padX, asc: m.asc + padY, desc: m.desc + padY,
            color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
 }
+// Ставит слово так, чтобы центр его рамки оказался в точке (bx, by)
+function placeAt(w, bx, by) {
+  w.x = bx - (w.right - w.left) / 2; w.y = by - (w.desc - w.asc) / 2;
+  w.l = w.x - w.left; w.r = w.x + w.right; w.t = w.y - w.asc; w.b = w.y + w.desc;
+  return w;
+}
 const hits = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+// Рамка целиком внутри сердца: проверяем углы и точки по краям, иначе длинное слово
+// может перекрыть ложбинку сверху, хотя все четыре угла внутри
+function boxInside(w) {
+  // Края рамки проверяем с шагом 2 px — дешёво благодаря маске
+  for (let x = w.l; x < w.r; x += 2) if (!inHeart(x, w.t) || !inHeart(x, w.b)) return false;
+  for (let y = w.t; y < w.b; y += 2) if (!inHeart(w.l, y) || !inHeart(w.r, y)) return false;
+  return inHeart(w.r, w.t) && inHeart(w.r, w.b);
+}
+
+// Сетка для поиска соседей: слово сравнивается только с теми, кто лежит в тех же клетках
+function makeGrid(cell) {
+  const cells = new Map();
+  const each = (w, fn) => {
+    for (let gx = Math.floor(w.l / cell); gx <= Math.floor(w.r / cell); gx++)
+      for (let gy = Math.floor(w.t / cell); gy <= Math.floor(w.b / cell); gy++) fn(gx * 4096 + gy);
+  };
+  return {
+    fits(w) {
+      let ok = true;
+      each(w, k => { if (ok) for (const o of cells.get(k) || []) if (hits(o, w)) { ok = false; break; } });
+      return ok;
+    },
+    add(w) { each(w, k => { if (!cells.has(k)) cells.set(k, []); cells.get(k).push(w); }); },
+  };
+}
 
 // Вся раскладка считается заранее, а потом слова проявляются по одному в порядке очереди:
-// сначала по контуру (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз
+// сначала вдоль контура (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз.
+// Все слова лежат строго внутри контура, поэтому край сердца ровный.
 function buildPlan() {
-  // Середину оставляем пустой: там потом проявится подсказка к посланию
-  const placed = [hint.box], fits = w => !placed.some(o => hits(o, w));
-  const ring = [];
-  for (let i = 0; i <= 900; i++) {
-    const [x, y] = toScreen(...heartPoint(2 * Math.PI * i / 900).map(v => v * 0.97));
-    const w = makeWord(x, y);
-    if (w.l > 4 && w.r < W - 4 && fits(w)) { placed.push(w); ring.push(w); }
+  const grid = makeGrid(Math.max(16, unit * 2));
+  const fits = w => grid.fits(w);
+  const ring = [], STEPS = 720;
+  const edge = Array.from({ length: STEPS }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / STEPS)));
+  for (let i = 0; i < STEPS; i++) {
+    const [px, py] = edge[i], [ax, ay] = edge[(i + STEPS - 1) % STEPS], [bx, by] = edge[(i + 1) % STEPS];
+    // Нормаль к контуру, направленная внутрь сердца
+    let nx = -(by - ay), ny = bx - ax;
+    const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
+    if (!inHeart(px + nx * 3, py + ny * 3)) { nx = -nx; ny = -ny; }
+    const w = makeWord();
+    const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
+    placeAt(w, px + nx * (halfN + unit * 0.12), py + ny * (halfN + unit * 0.12));
+    if (boxInside(w) && fits(w)) { grid.add(w); ring.push(w); }
   }
   const fill = [];
-  for (let misses = 0; misses < 2500;) {
+  for (let misses = 0; misses < 8000;) {
     const x = cx + (Math.random() * 32 - 16) * unit, y = cy + (Math.random() * 29 - 12) * unit;
-    if (!insidePoly(x, y)) continue;
-    const w = makeWord(x, y);
-    const inside = insidePoly(w.l, w.t) && insidePoly(w.r, w.t) && insidePoly(w.l, w.b) && insidePoly(w.r, w.b);
-    if (inside && fits(w)) { placed.push(w); fill.push(w); misses = 0; }
+    if (!inHeart(x, y)) continue;
+    const w = placeAt(makeWord(), x, y);
+    if (boxInside(w) && fits(w)) { grid.add(w); fill.push(w); misses = 0; }
     else misses++;
   }
   fill.forEach(w => { w.order = w.y + (Math.random() - 0.5) * unit * 4; });
@@ -227,20 +291,19 @@ function buildPlan() {
 }
 
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dpr = Math.min(window.devicePixelRatio || 1, 3);   // у айфонов плотность 3 — иначе мелкий текст мылится
   W = innerWidth; H = innerHeight;
   for (const c of [canvas, layer]) { c.width = W * dpr; c.height = H * dpr; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  unit = Math.min((W - 16) / 36, (H - 40) / 31);
+  unit = Math.min((W - 12) / 32.6, (H - 60) / 30);   // слова теперь целиком внутри контура, запас по краям не нужен
   cx = W / 2; cy = H / 2 - 2.5 * unit;
   poly = Array.from({ length: 240 }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / 240)));
+  buildMask();
 
-  // Подсказка в центре: маленькое сердце и «котейка»; кнопка лежит ровно на ней
-  const hw = unit * 4.6, hh = unit * 2.8, hy = cy + unit;
-  hint = { x: cx, y: hy, box: { l: cx - hw, r: cx + hw, t: hy - hh, b: hy + hh } };
-  const bw = Math.max(hw * 2, 120), bh = Math.max(hh * 2, 88);
-  Object.assign(openBtn.style, { left: `${cx - bw / 2}px`, top: `${hy - bh / 2}px`, width: `${bw}px`, height: `${bh}px` });
+  // Невидимая кнопка — в середине сердца, с запасом под палец
+  const bw = Math.max(unit * 9, 120), bh = Math.max(unit * 5.6, 88), by = cy + unit;
+  Object.assign(openBtn.style, { left: `${cx - bw / 2}px`, top: `${by - bh / 2}px`, width: `${bw}px`, height: `${bh}px` });
 
   words = buildPlan(); next = 0; doneAt = Infinity;
   personal = words.filter(w => w.mine);
@@ -399,20 +462,6 @@ function frame() {
     const sp = sparkles[i], age = now - sp.born;
     if (age > 1.2) { sparkles.splice(i, 1); continue; }
     drawWord(ctx, sp.w, Math.sin(Math.PI * age / 1.2), unit * 0.9, "#fff1f1");
-  }
-
-  // Подсказка проявляется, когда сердце собрано, и дальше тихо дышит
-  if (now > doneAt + 0.6) {
-    const k = easeOut(Math.min(1, (now - doneAt - 0.6) / 1.8));
-    const breath = reduceMotion ? 1 : 0.75 + 0.25 * Math.sin((now - doneAt) * 2.2);
-    ctx.globalAlpha = k * breath;
-    ctx.shadowColor = NEON; ctx.shadowBlur = unit * 1.6;
-    ctx.fillStyle = NEON;
-    tinyHeart(hint.x, hint.y - unit * 0.9, unit * 2.2 * (1 + 0.08 * beat));
-    ctx.font = `italic 600 ${Math.max(14, unit * 1.25)}px ${LETTER_FONT}`;
-    ctx.fillStyle = PERSONAL_COLOR;
-    ctx.shadowBlur = unit * 0.8;
-    ctx.fillText("котейка", hint.x, hint.y + unit * 1.3);
   }
   ctx.restore();
 
