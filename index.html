@@ -175,9 +175,9 @@ const OUTLINE_TIME = 4.5, FILL_TIME = 6.5;    // контур, затем сер
 
 // Маска сердца: один байт на CSS-пиксель, «внутри ли точка» — это просто чтение из массива.
 // Раскладка проверяет десятки тысяч точек, и честная геометрия на 240 вершин замораживала страницу на секунды.
-// Две маски: точная форма — для середины, и чуть шире — для слов контура: им можно
-// немного выступать наружу, как в референсе, иначе край выглядит слишком ровным.
-const OVERHANG = 1.08;
+// Две маски: точная форма — для середины, и чуть шире — для слов контура: они лишь
+// касаются края, чтобы силуэт был живым, но не рваным.
+const OVERHANG = 1.03;
 let mask = null, looseMask = null;
 function buildMask(scale) {
   const m = document.createElement("canvas");
@@ -221,11 +221,14 @@ function measure(text, size) {
 // Не легла фраза — уходит в конец колоды, а не теряется.
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 let deck = [], personalLeft = [];
-function makeWord(personalWord = false) {
+// На контуре — только небольшие слова почти одного кегля: так силуэт читается ровной линией.
+// Крупные и разные по размеру надписи живут внутри.
+function makeWord(personalWord = false, edge = false) {
   const mine = personalWord && personalLeft.length > 0;
   const text = mine ? personalLeft[0] : deck[0];
-  const big = Math.random() < 0.18;
-  const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
+  const big = !edge && Math.random() < 0.18;
+  const scale = edge ? 0.7 + Math.random() * 0.1 : big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28;
+  const size = Math.max(8, Math.round(unit * scale));
   const m = measure(text, size);
   const padX = size * 0.13, padY = size * 0.07;   // половина зазора между соседями
   return { text, size, mine, left: m.left + padX, right: m.right + padX, asc: m.asc + padY, desc: m.desc + padY,
@@ -294,10 +297,10 @@ function buildPlan() {
     let nx = -(by - ay), ny = bx - ax;
     const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
     if (!inHeart(px + nx * 3, py + ny * 3)) { nx = -nx; ny = -ny; }
-    const w = makeWord(false);
+    const w = makeWord(false, true);
     const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
-    // Центр слова чуть внутри контура: примерно треть надписи выступает наружу
-    const inset = halfN * 0.4 + unit * 0.1;
+    // Слово почти целиком внутри: наружу заходит лишь самый край надписи
+    const inset = halfN * 0.85 + unit * 0.05;
     placeAt(w, px + nx * inset, py + ny * inset);
     tryPlace(w, looseMask, ring);
   }
