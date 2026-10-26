@@ -142,7 +142,7 @@
 <script>
 const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך"];
 // Свои словечки: каждое ровно один раз, светлее остальных и вспыхивают чаще
-const PERSONAL = ["котейка", "кот любимый", "2,5 года", "мой котейка", "люблю тебя, котейка", "кошка", "любимая"];
+const PERSONAL = ["котейка", "кот любимый", "2,5 года", "моя котейка", "люблю тебя, котейка", "кошка", "любимая"];
 const PERSONAL_COLOR = "#ffd9dc";
 // В основном неоново-красный, изредка светлые надписи — как в референсе
 const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
@@ -276,18 +276,26 @@ function buildPlan() {
   // Одинаковые фразы не ставим ближе этого расстояния друг к другу
   const seen = new Map(), MIN_SAME = unit * 9;
   const farFromSame = w => (seen.get(w.text) || []).every(([x, y]) => Math.hypot(x - w.x, y - w.y) > MIN_SAME);
-  // Не влезшая фраза пробует ещё несколько мест и только потом уступает очередь —
-  // иначе длинные фразы почти не попадали бы в сердце, а короткие повторялись
-  let tries = 0;
-  const tryPlace = (w, m, list) => {
-    const ok = w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4 && boxInside(w, m) && grid.fits(w) && farFromSame(w);
-    if (w.mine) { const word = personalLeft.shift(); if (!ok) personalLeft.push(word); }
-    else if (ok || ++tries >= 25) { deck.push(deck.shift()); tries = 0; }
-    if (!ok) return false;
+  // "ok" — можно ставить; "busy" — место занято соседом; "bad" — фраза здесь не помещается вообще
+  const check = (w, m) => {
+    if (!(w.l > 4 && w.r < W - 4 && w.t > 4 && w.b < H - 4 && boxInside(w, m) && farFromSame(w))) return "bad";
+    return grid.fits(w) ? "ok" : "busy";
+  };
+  const commit = (w, list) => {
     grid.add(w); list.push(w);
     if (!seen.has(w.text)) seen.set(w.text, []);
     seen.get(w.text).push([w.x, w.y]);
-    return true;
+  };
+  const rotate = () => deck.push(deck.shift());
+  // Середина: не влезшая фраза пробует ещё несколько мест и только потом уступает очередь —
+  // иначе длинные фразы почти не попадали бы в сердце, а короткие повторялись
+  let tries = 0;
+  const tryPlace = (w, m, list) => {
+    const ok = check(w, m) === "ok";
+    if (w.mine) { const word = personalLeft.shift(); if (!ok) personalLeft.push(word); }
+    else if (ok || ++tries >= 25) { rotate(); tries = 0; }
+    if (ok) commit(w, list);
+    return ok;
   };
   const ring = [], STEPS = 720;
   const edge = Array.from({ length: STEPS }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / STEPS)));
@@ -297,12 +305,19 @@ function buildPlan() {
     let nx = -(by - ay), ny = bx - ax;
     const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
     if (!inHeart(px + nx * 3, py + ny * 3)) { nx = -nx; ny = -ny; }
-    const w = makeWord(false, true);
-    const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
-    // Слово почти целиком внутри: наружу заходит лишь самый край надписи
-    const inset = halfN * 0.85 + unit * 0.05;
-    placeAt(w, px + nx * inset, py + ny * inset);
-    tryPlace(w, looseMask, ring);
+    // Контур идёт сплошной линией: если фраза здесь не помещается (длинная на крутом изгибе),
+    // сразу пробуем следующую, а если место просто занято соседом — ждём следующую точку
+    for (let k = 0; k < 4; k++) {
+      const w = makeWord(false, true);
+      const halfN = Math.abs(nx) * (w.left + w.right) / 2 + Math.abs(ny) * (w.asc + w.desc) / 2;
+      // Слово почти целиком внутри: наружу заходит лишь самый край надписи
+      const inset = halfN * 0.85 + unit * 0.05;
+      placeAt(w, px + nx * inset, py + ny * inset);
+      const res = check(w, looseMask);
+      if (res === "ok") { commit(w, ring); rotate(); break; }
+      if (res === "busy") break;
+      rotate();
+    }
   }
   const fill = [];
   const randomPoint = () => {
