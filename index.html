@@ -1,5 +1,27 @@
-<title>Neon Love Heart</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Открой, это тебе">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dxdnn64-prog.github.io/">
+<meta property="og:title" content="Для котейки ❤">
+<meta property="og:description" content="Открой, это тебе">
+<meta property="og:image" content="https://dxdnn64-prog.github.io/preview.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#050304">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Котейка">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+<title>Для котейки ❤</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap">
@@ -70,6 +92,20 @@
   .letter-body { display: flex; flex-direction: column; gap: 1em; font: 500 clamp(21px, 5.4vw, 27px)/1.45 var(--font-letter); color: var(--petal); }
   .letter-body p { margin: 0; text-wrap: pretty; }
   .letter-sign { font: italic 500 clamp(20px, 5vw, 25px)/1.3 var(--font-letter); color: var(--blush); text-align: right; }
+  .letter-counter {
+    margin: 0; font: 500 14px/1.5 var(--font-phrase); color: var(--blush);
+    letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+    opacity: 0; transition: opacity 1s ease;
+  }
+  .letter-counter.shown { opacity: 1; }
+  .letter-counter b { color: var(--petal); font-weight: 600; }
+  /* Печатная машинка: ещё не напечатанный текст уже занимает место, поэтому строки не прыгают */
+  .typed-rest { color: transparent; }
+  .typing .typed-done::after {
+    content: ""; display: inline-block; width: 2px; height: 0.9em; margin-left: 1px;
+    background: var(--neon); vertical-align: -0.1em; animation: caret 0.8s steps(1) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
   #close-letter {
     align-self: flex-start;
     font: 500 15px/1 var(--font-phrase); color: var(--blush);
@@ -81,7 +117,8 @@
     #letter, .letter-inner { transition: none; }
   }
 </style>
-
+</head>
+<body>
 <canvas id="heart" aria-label="Сердце из фразы «Я тебя люблю» на 36 языках"></canvas>
 <button id="open-letter" type="button" aria-label="Открыть послание"></button>
 <div class="hint">Нажми на экран</div>
@@ -96,6 +133,7 @@
       <p>Желаю, чтобы рядом всегда было тепло, спокойно и весело, а всё задуманное сбывалось.</p>
       <p>Я тебя очень-очень сильно люблю.</p>
     </div>
+    <p class="letter-counter" id="together" aria-live="off"></p>
     <div class="letter-sign">— кот любимый</div>
     <button id="close-letter" type="button">← Назад к сердцу</button>
   </div>
@@ -103,12 +141,16 @@
 
 <script>
 const PHRASES = ["Miluji tě", "Ti amo", "Te quiero", "Мен сені сүйемін", "Я тебя люблю", "Mi amas vin", "Jeg elsker deg", "Aš tave myliu", "Σ' αγαπώ", "Minä rakastan sinua", "Eu te amo", "사랑해", "我爱你", "I love you", "Ik hou van jou", "Je t'aime", "Ich liebe dich", "Kocham cię", "Anh yêu em", "Seni seviyorum", "मैं तुमसे प्यार करता हूँ", "Aku cinta kamu", "Es tevi mīlu", "أحبك", "Nakupenda", "Я цябе кахаю", "愛してる", "მიყვარხარ", "Szeretlek", "Te iubesc", "ฉันรักเธอ", "Ես քեզ սիրում եմ", "Jag älskar dig", "Is breá liom thú", "Ma armastan sind", "אני אוהב אותך"];
+// Свои словечки: попадаются реже, светлее и вспыхивают чаще остальных
+const PERSONAL = ["котейка", "кот любимый", "2,5 года", "мой котейка", "люблю тебя, котейка"];
+const PERSONAL_COLOR = "#ffd9dc";
 // В основном неоново-красный, изредка светлые надписи — как в референсе
 const COLORS = ["#ff3b47", "#ff3b47", "#ff3b47", "#ff4f4f", "#ff2d3c", "#ff6b6b", "#ff8a8a", "#ffd0d0"];
 const css = getComputedStyle(document.documentElement);
 const FONT = css.getPropertyValue("--font-phrase").trim();
 const NIGHT = css.getPropertyValue("--night").trim();
 const NEON = css.getPropertyValue("--neon").trim();
+const LETTER_FONT = css.getPropertyValue("--font-letter").trim();
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const canvas = document.getElementById("heart");
@@ -127,7 +169,7 @@ function heartPoint(t) {
 }
 
 let W = 0, H = 0, dpr = 1, unit = 1, cx = 0, cy = 0;
-let poly = [], words = [], next = 0, start = 0, doneAt = Infinity;
+let poly = [], words = [], personal = [], next = 0, start = 0, doneAt = Infinity, hint = null;
 const toScreen = (x, y) => [cx + x * unit, cy + y * unit];
 // Появление по одному — суть рисунка, поэтому оно есть всегда; при «уменьшить движение» убираем только всплытие, пульс и вспышки
 const FADE = 0.7;                             // сколько проявляется одно слово
@@ -143,20 +185,23 @@ function insidePoly(x, y) {
 }
 
 function makeWord(x, y) {
-  const text = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+  const mine = Math.random() < 0.07;
+  const pool = mine ? PERSONAL : PHRASES;
+  const text = pool[Math.floor(Math.random() * pool.length)];
   const big = Math.random() < 0.18;
   const size = Math.max(8, Math.round(unit * (big ? 0.9 + Math.random() * 0.25 : 0.55 + Math.random() * 0.28)));
   ctx.font = `700 ${size}px ${FONT}`;
   const w = ctx.measureText(text).width, h = size * 1.05, pad = size * 0.12;
-  return { text, size, x, y, w, h, l: x - w / 2 - pad, r: x + w / 2 + pad, t: y - h / 2, b: y + h / 2,
-           color: COLORS[Math.floor(Math.random() * COLORS.length)] };
+  return { text, size, x, y, w, h, l: x - w / 2 - pad, r: x + w / 2 + pad, t: y - h / 2, b: y + h / 2, mine,
+           color: mine ? PERSONAL_COLOR : COLORS[Math.floor(Math.random() * COLORS.length)] };
 }
 const hits = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
 
 // Вся раскладка считается заранее, а потом слова проявляются по одному в порядке очереди:
 // сначала по контуру (как перо, от ложбинки по часовой стрелке), затем середина сверху вниз
 function buildPlan() {
-  const placed = [], fits = w => !placed.some(o => hits(o, w));
+  // Середину оставляем пустой: там потом проявится подсказка к посланию
+  const placed = [hint.box], fits = w => !placed.some(o => hits(o, w));
   const ring = [];
   for (let i = 0; i <= 900; i++) {
     const [x, y] = toScreen(...heartPoint(2 * Math.PI * i / 900).map(v => v * 0.97));
@@ -191,10 +236,14 @@ function resize() {
   cx = W / 2; cy = H / 2 - 2.5 * unit;
   poly = Array.from({ length: 240 }, (_, i) => toScreen(...heartPoint(2 * Math.PI * i / 240)));
 
-  const r = unit * 5;
-  Object.assign(openBtn.style, { left: `${cx - r}px`, top: `${cy - r * 0.6}px`, width: `${r * 2}px`, height: `${r * 1.6}px` });
+  // Подсказка в центре: маленькое сердце и «котейка»; кнопка лежит ровно на ней
+  const hw = unit * 4.6, hh = unit * 2.8, hy = cy + unit;
+  hint = { x: cx, y: hy, box: { l: cx - hw, r: cx + hw, t: hy - hh, b: hy + hh } };
+  const bw = Math.max(hw * 2, 120), bh = Math.max(hh * 2, 88);
+  Object.assign(openBtn.style, { left: `${cx - bw / 2}px`, top: `${hy - bh / 2}px`, width: `${bw}px`, height: `${bh}px` });
 
   words = buildPlan(); next = 0; doneAt = Infinity;
+  personal = words.filter(w => w.mine);
   start = performance.now() / 1000;
   lctx.clearRect(0, 0, W, H);
 }
@@ -233,13 +282,75 @@ function tinyHeart(x, y, s) {
   ctx.fill();
 }
 
+// Начало отношений — от этой даты считается «вместе уже…» (год-месяц-день)
+const TOGETHER_SINCE = new Date("2024-05-01T00:00:00");
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+const counter = document.getElementById("together");
+function updateCounter() {
+  const sec = Math.max(0, Math.floor((Date.now() - TOGETHER_SINCE) / 1000));
+  const d = Math.floor(sec / 86400), h = Math.floor(sec / 3600) % 24, m = Math.floor(sec / 60) % 60, s = sec % 60;
+  counter.innerHTML = `Мы вместе уже <b>${d}</b> ${plural(d, "день", "дня", "дней")}, ` +
+    `<b>${h}</b> ${plural(h, "час", "часа", "часов")}, <b>${m}</b> ${plural(m, "минуту", "минуты", "минут")} ` +
+    `и <b>${s}</b> ${plural(s, "секунду", "секунды", "секунд")}`;
+}
+let counterTimer = 0;
+
+// Печатная машинка: заголовок, абзацы и подпись печатаются по очереди, по букве.
+// Нажатие по посланию допечатывает всё сразу. Печатается только при первом открытии.
+const typedEls = [letter.querySelector(".letter-mark"), ...letter.querySelectorAll(".letter-body p"), letter.querySelector(".letter-sign")];
+typedEls.forEach(el => { el.dataset.full = el.textContent.trim(); });
+let typeTimer = 0, typedOnce = false;
+function setTyped(el, n) {
+  const full = el.dataset.full;
+  el.innerHTML = "";
+  const done = document.createElement("span"), rest = document.createElement("span");
+  done.className = "typed-done"; rest.className = "typed-rest";
+  done.textContent = full.slice(0, n); rest.textContent = full.slice(n);
+  el.append(done, rest);
+}
+function finishTyping() {
+  clearTimeout(typeTimer);
+  typedEls.forEach(el => { el.textContent = el.dataset.full; el.classList.remove("typing"); });
+  counter.classList.add("shown");
+  typedOnce = true;
+}
+function typeLetter() {
+  if (typedOnce) { finishTyping(); return; }
+  typedEls.forEach(el => setTyped(el, 0));
+  let i = 0, n = 0;
+  const step = () => {
+    const el = typedEls[i];
+    el.classList.add("typing");
+    setTyped(el, ++n);
+    if (n < el.dataset.full.length) { typeTimer = setTimeout(step, el.dataset.full[n - 1] === "," ? 160 : 38); return; }
+    el.classList.remove("typing");
+    if (i === typedEls.length - 2) counter.classList.add("shown");   // счётчик — после последнего абзаца
+    i++; n = 0;
+    if (i < typedEls.length) typeTimer = setTimeout(step, 420);
+    else typedOnce = true;
+  };
+  typeTimer = setTimeout(step, 500);
+}
+letter.addEventListener("click", e => { if (!typedOnce && e.target.id !== "close-letter") finishTyping(); });
+
 // Послание
 function showLetter() {
   letter.hidden = false;
+  updateCounter();
+  counterTimer = setInterval(updateCounter, 1000);
+  typeLetter();
   requestAnimationFrame(() => requestAnimationFrame(() => letter.classList.add("shown")));
   document.getElementById("close-letter").focus({ preventScroll: true });
 }
 function hideLetter() {
+  clearInterval(counterTimer);
+  if (!typedOnce) finishTyping();
   letter.classList.remove("shown");
   setTimeout(() => { letter.hidden = true; }, reduceMotion ? 0 : 600);
   openBtn.focus({ preventScroll: true });
@@ -256,7 +367,10 @@ function frame() {
   for (const c of [ctx, lctx]) { c.textAlign = "center"; c.textBaseline = "middle"; }
 
   // Полностью проявившиеся слова «запекаем» в слой; живые — те, что между next и текущим моментом
-  while (next < words.length && t - words[next].at >= FADE) drawWord(lctx, words[next++], 1, unit * 0.35);
+  while (next < words.length && t - words[next].at >= FADE) {
+    const w = words[next++];
+    drawWord(lctx, w, 1, unit * (w.mine ? 0.9 : 0.35));
+  }
   if (next === words.length && doneAt === Infinity) doneAt = now;
 
   // Когда сердце собрано, оно мягко бьётся
@@ -276,12 +390,29 @@ function frame() {
     drawWord(ctx, w, k, unit * (0.35 + 1.2 * (1 - k)), k < 0.5 ? "#ffe9ea" : w.color, reduceMotion ? 0 : (1 - k) * unit * 0.8);
   }
 
-  // Редкие вспышки отдельных слов
-  if (now > doneAt && !reduceMotion && Math.random() < dt * 6) sparkles.push({ w: words[Math.floor(Math.random() * words.length)], born: now });
+  // Редкие вспышки отдельных слов; свои словечки вспыхивают в половине случаев
+  if (now > doneAt && !reduceMotion && Math.random() < dt * 6) {
+    const pool = personal.length && Math.random() < 0.5 ? personal : words;
+    sparkles.push({ w: pool[Math.floor(Math.random() * pool.length)], born: now });
+  }
   for (let i = sparkles.length - 1; i >= 0; i--) {
     const sp = sparkles[i], age = now - sp.born;
     if (age > 1.2) { sparkles.splice(i, 1); continue; }
     drawWord(ctx, sp.w, Math.sin(Math.PI * age / 1.2), unit * 0.9, "#fff1f1");
+  }
+
+  // Подсказка проявляется, когда сердце собрано, и дальше тихо дышит
+  if (now > doneAt + 0.6) {
+    const k = easeOut(Math.min(1, (now - doneAt - 0.6) / 1.8));
+    const breath = reduceMotion ? 1 : 0.75 + 0.25 * Math.sin((now - doneAt) * 2.2);
+    ctx.globalAlpha = k * breath;
+    ctx.shadowColor = NEON; ctx.shadowBlur = unit * 1.6;
+    ctx.fillStyle = NEON;
+    tinyHeart(hint.x, hint.y - unit * 0.9, unit * 2.2 * (1 + 0.08 * beat));
+    ctx.font = `italic 600 ${Math.max(14, unit * 1.25)}px ${LETTER_FONT}`;
+    ctx.fillStyle = PERSONAL_COLOR;
+    ctx.shadowBlur = unit * 0.8;
+    ctx.fillText("котейка", hint.x, hint.y + unit * 1.3);
   }
   ctx.restore();
 
@@ -309,3 +440,5 @@ addEventListener("resize", () => {
 resize();
 requestAnimationFrame(frame);
 </script>
+</body>
+</html>
